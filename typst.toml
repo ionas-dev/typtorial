@@ -9,7 +9,7 @@ keywords = ["tutorial", "code", "diff", "slides", "html"]
 repository = "https://github.com/ionas-dev/typtorial"
 categories = ["presentation"]
 compiler = "0.15.0"
-exclude = ["/screenshots"]
+exclude = ["/screenshots", "/scripts", "/examples", "/docs"]
 
 [template]
 path = "template"

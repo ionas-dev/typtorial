@@ -16,6 +16,38 @@
   if icon != none { image("icons/" + icon + ".svg", height: 1.1em) }
 }
 
+// Typst has no base64 encoder, but a data URL needs one for binary images.
+#let base64(data) = {
+  let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+  let data = array(data)
+  range(0, data.len(), step: 3)
+    .map(i => {
+      let chunk = data.slice(i, calc.min(i + 3, data.len()))
+      let value = (chunk + (0, 0)).slice(0, 3).fold(0, (sum, byte) => sum * 256 + byte)
+      range(4)
+        .map(k => if k <= chunk.len() {
+          alphabet.at(value.bit-rshift(18 - 6 * k).bit-and(63))
+        } else { "=" })
+        .join()
+    })
+    .join()
+}
+
+// The image type of a favicon by its first bytes: PNG, ICO or else SVG.
+#let image-type(data) = {
+  let start = array(data.slice(0, calc.min(4, data.len())))
+  if start == (0x89, 0x50, 0x4E, 0x47) { "image/png" } else if start == (0, 0, 1, 0) {
+    "image/x-icon"
+  } else { "image/svg+xml" }
+}
+
+// Plain text of a title for the `<title>` of the website.
+#let plain-text(it) = if type(it) == str { it } else if it.has("text") {
+  plain-text(it.text)
+} else if it.has("children") { it.children.map(plain-text).join() } else if it.has("body") {
+  plain-text(it.body)
+} else if it.func() == [ ].func() { " " } else { "" }
+
 #let default-theme = yaml("../themes/default.theme.yaml")
 
 #let themes = (
@@ -28,8 +60,10 @@
 
 #let diff-off = metadata((typtorial: "diff-off"))
 #let diff-on = metadata((typtorial: "diff-on"))
-// Code blocks shown as tabs: `#tabs[```py a.py …``` ```py b.py …```]` or one argument per block.
-#let tabs(..blocks) = metadata((typtorial: "tabs", body: blocks.pos().join()))
+// The download and theme buttons of the header, repeated inside the text. Only for the
+// documentation of typtorial; `lib.typ` does not export them.
+#let download-button = metadata((typtorial: "download-button"))
+#let theme-button = metadata((typtorial: "theme-button"))
 
 #let copy-labels = (
   en: (
@@ -59,9 +93,9 @@
   source-name: "tutorial.typ",
   diff: true,
   show-removed: true,
-  tabs: true,
   logo: none,
   logo-dark: auto,
+  favicon: auto,
   theme: (:),
   fonts: (:),
   sizes: (:),
@@ -264,7 +298,6 @@
   }
   let brand-text = setting("brand", "text")
   let labels = copy-labels.at(lang, default: copy-labels.en)
-  let all-tabs = tabs
 
   set document(title: title) if title != none
   set page(
@@ -577,7 +610,7 @@
       },
     )
 
-    // `#diff-off`, `#diff-on` and `#tabs` arrive as metadata markers between the other elements.
+    // `#diff-off` and `#diff-on` arrive as metadata markers between the other elements.
     let marker(el) = if el.func() == metadata and type(el.value) == dictionary {
       el.value.at("typtorial", default: none)
     }
@@ -618,28 +651,16 @@
     let previous = (:)
     let output = ()
     for (number, content) in steps.enumerate(start: 1) {
-      // Code blocks in order of appearance; `group` tells which tabs they belong to, if any.
+      // Code blocks in order of appearance.
       let blocks = ()
-      let groups = 0
       let earlier = previous
       // Blocks without a file name are compared by their position among those of the step.
       let unnamed = 0
       for item in content {
         let kind = marker(item.el)
         if kind in ("diff-on", "diff-off") { diffing = kind == "diff-on" }
-        let members = if is-code(item.el) {
-          (item,)
-        } else if kind == "tabs" {
-          groups += 1
-          flatten(item.el.value.body, item.restyle).filter(it => (
-            it.el.func() not in (parbreak, [ ].func())
-          ))
-        } else {
-          ()
-        }
-        for member in members {
-          let el = member.el
-          assert(is-code(el), message: "tabs only takes code blocks")
+        if is-code(item.el) {
+          let el = item.el
           let lines = el.text.split("\n")
           // Typst delivers the file name as the first code line; it only counts as a name if it
           // looks like one (a single word with an extension, e.g. `src/main.py`).
@@ -660,22 +681,13 @@
             lines: lines,
             lang: el.lang,
             changes: changes,
-            restyle: member.restyle,
-            body: (member.restyle)(with-diff(el.lang, changes)),
-            group: if all-tabs { 0 } else if kind == "tabs" { groups },
+            restyle: item.restyle,
+            body: (item.restyle)(with-diff(el.lang, changes)),
           ))
         }
       }
-      // Blocks of the same tabs form one entry, placed where the first of them appears.
-      let entries = ()
-      for block in blocks {
-        let at = entries.position(entry => (
-          block.group != none and entry.group == block.group
-        ))
-        if at == none { entries.push((group: block.group, blocks: (block,))) } else {
-          entries.at(at).blocks.push(block)
-        }
-      }
+      // All blocks of a step form one entry; several of them are shown as tabs.
+      let entries = if blocks.len() > 0 { ((blocks: blocks),) } else { () }
       let tab-name(block, index) = if block.name != "" { block.name } else {
         str(index + 1)
       }
@@ -730,6 +742,30 @@
       let text-items = content.filter(item => not is-code(item.el))
       let text-of(items) = {
         show heading.where(level: 1): step-heading.with(step: number, total: steps.len())
+        show metadata: it => {
+          let kind = marker(it)
+          let button = (
+            "download-button": if source != none { ("download", labels.download, "\u{2913}") },
+            "theme-button": if has-dark { ("theme-toggle", labels.theme, "\u{25D0}") },
+          ).at(kind, default: none)
+          if button == none { it } else if web {
+            let (class, label, _) = button
+            html.elem("button", attrs: (
+              type: "button",
+              class: "header-button inline " + class,
+              aria-label: label,
+              title: label,
+            ))
+          } else {
+            // Without a header button in the PDF the icon only stands for the one on the website.
+            // Placed, so the circle does not push the lines apart.
+            box(width: 1.1em, height: 0.7em, place(center + horizon, circle(
+              radius: 0.55em,
+              stroke: 0.75pt + accent,
+              align(center + horizon, text(size: 0.75em, button.last())),
+            )))
+          }
+        }
         show link: it => if web { it } else {
           underline(stroke: 1pt + accent, offset: 0.2em, it)
         }
@@ -895,137 +931,160 @@
     let output = intro + output
 
     if web {
-      html.elem("style", read("assets/web.css"))
-      let variables(scheme, dark) = (
-        background: scheme.background.to-hex(),
-        text: scheme.text.to-hex(),
-        line: scheme.line.to-hex(),
-        accent: scheme.accent.to-hex(),
-        heading: scheme.heading.to-hex(),
-        code-background: scheme.code-background.to-hex(),
-        header: if scheme.header != none {
-          scheme.header.to-hex()
-        } else {
-          "linear-gradient(122deg, var(--background), var(--gradient-end)) fixed"
-        },
-        header-text: scheme.header-text.to-hex(),
-        code-text: scheme.code-text.to-hex(),
-        gradient-end: if scheme.gradient-end != none { scheme.gradient-end } else {
-          scheme.background
-        }.to-hex(),
-        heading-bar: if scheme.heading-bar != none { scheme.heading-bar.to-hex() } else {
-          "transparent"
-        },
-        // Copy button: a color that stands out from the code panel needs no visible border.
-        button: if scheme.button != none { scheme.button } else {
-          scheme.code-background
-        }.to-hex(),
-        button-border: if scheme.button != none
-          and scheme.button != scheme.code-background {
-          scheme.button
-        } else {
-          scheme.line
-        }.to-hex(),
-        button-text: if scheme.button-text != none { scheme.button-text } else {
-          scheme.code-text
-        }.to-hex(),
-        code-border: if code-border { scheme.line.to-hex() } else { "transparent" },
-        added: scheme.diff.added.at(0).to-hex(),
-        added-bar: scheme.diff.added.at(1).to-hex(),
-        removed: scheme.diff.removed.at(0).to-hex(),
-        removed-bar: scheme.diff.removed.at(1).to-hex(),
-        // The syntax colors are made for a light panel; in the dark scheme they get inverted.
-        syntax-filter: if dark { "invert(1) hue-rotate(180deg)" } else { "none" },
-        title-background: if scheme.title-background != none {
-          scheme.title-background.to-hex()
-        } else {
-          "transparent"
-        },
-        title-text: scheme.title-text.to-hex(),
-        abstract-background: if scheme.abstract-background != none {
-          scheme.abstract-background.to-hex()
-        } else {
-          "transparent"
-        },
-        abstract-text: scheme.abstract-text.to-hex(),
-        logo-light: if dark { "none" } else { "block" },
-        logo-dark: if dark { "block" } else { "none" },
-      )
-        .pairs()
-        .map(((name, value)) => "--" + name + ":" + value + ";")
-        .join()
-      html.elem("style", {
-        ":root {"
-        variables(light-scheme, false)
-        "--corner-radius:" + str(corner-radius * 1.5) + "rem;"
-        "--text-position:" + if text-top { "start" } else { "center" } + ";"
-        // The stylesheet's sizes belong to the default sizes; scale them in proportion.
-        "--size-text:" + str(calc.round(1.125 * size("text") / 14, digits: 3)) + "rem;"
-        (
-          "--size-heading:"
-            + str(calc.round(1.2 * size("heading") / 15, digits: 3))
-            + "rem;"
-        )
-        "--size-title:" + str(calc.round(1.35 * size("title") / 17, digits: 3)) + "rem;"
-        (
-          "--size-title-page:"
-            + str(calc.round(2.6 * size("title-page") / 30, digits: 3))
-            + "rem;"
-        )
-        "--size-brand:" + str(calc.round(1.6 * size("brand") / 20, digits: 3)) + "rem;"
-        "--size-code:" + str(calc.round(0.8 * size("code") / 10.9, digits: 3)) + "rem;"
-        "--font-text:" + css-fonts(text-font) + ";"
-        "--font-code:" + css-fonts(code-font, generic: "monospace") + ";"
-        "--font-brand:" + css-fonts(brand-font) + ";"
-        "}"
-        if has-dark {
-          ":root[data-theme=\"dark\"] {" + variables(dark-scheme, true) + "}"
-          "@media (prefers-color-scheme: dark) { :root:not([data-theme=\"light\"]) {"
-          variables(dark-scheme, true)
-          "} }"
-        }
-      })
-      html.elem("header", {
-        html.elem(
-          "span",
-          attrs: (
-            class: "title"
-              + if title-underline { "" } else { " no-underline" }
-              + if title-uppercase { " uppercase" } else { "" },
-          ),
-          title,
-        )
-        html.elem("span", attrs: (class: "brand"), {
-          if source != none {
-            html.elem("button", attrs: (
-              type: "button",
-              class: "header-button download",
-              aria-label: labels.download,
-              title: labels.download,
-              data-source: source,
-              data-name: source-name,
+      // An own root element, as Typst only builds the head itself when there is none; the
+      // favicon could not go in there otherwise.
+      let icon = if favicon == auto { read("assets/favicon.svg", encoding: none) } else {
+        favicon
+      }
+      html.elem("html", attrs: (lang: lang), {
+        html.elem("head", {
+          html.elem("meta", attrs: (charset: "utf-8"))
+          html.elem("meta", attrs: (
+            name: "viewport",
+            content: "width=device-width, initial-scale=1",
+          ))
+          if title != none { html.elem("title", plain-text(title)) }
+          if icon != none {
+            html.elem("link", attrs: (
+              rel: "icon",
+              href: "data:" + image-type(icon) + ";base64," + base64(icon),
             ))
           }
-          if has-dark {
-            html.elem("button", attrs: (
-              type: "button",
-              class: "header-button theme-toggle",
-              aria-label: labels.theme,
-              title: labels.theme,
-            ))
-          }
-          // Both logos are embedded; the stylesheet shows the one matching the color scheme.
-          if light-scheme.logo != none {
-            html.elem("span", attrs: (class: "logo-light"), light-scheme.logo)
-          }
-          if dark-scheme.logo != none {
-            html.elem("span", attrs: (class: "logo-dark"), dark-scheme.logo)
-          }
-          brand-text
+              html.elem("style", read("assets/web.css"))
+              let variables(scheme, dark) = (
+                background: scheme.background.to-hex(),
+                text: scheme.text.to-hex(),
+                line: scheme.line.to-hex(),
+                accent: scheme.accent.to-hex(),
+                heading: scheme.heading.to-hex(),
+                code-background: scheme.code-background.to-hex(),
+                header: if scheme.header != none {
+                  scheme.header.to-hex()
+                } else {
+                  "linear-gradient(122deg, var(--background), var(--gradient-end)) fixed"
+                },
+                header-text: scheme.header-text.to-hex(),
+                code-text: scheme.code-text.to-hex(),
+                gradient-end: if scheme.gradient-end != none { scheme.gradient-end } else {
+                  scheme.background
+                }.to-hex(),
+                heading-bar: if scheme.heading-bar != none { scheme.heading-bar.to-hex() } else {
+                  "transparent"
+                },
+                // Copy button: a color that stands out from the code panel needs no visible border.
+                button: if scheme.button != none { scheme.button } else {
+                  scheme.code-background
+                }.to-hex(),
+                button-border: if scheme.button != none
+                  and scheme.button != scheme.code-background {
+                  scheme.button
+                } else {
+                  scheme.line
+                }.to-hex(),
+                button-text: if scheme.button-text != none { scheme.button-text } else {
+                  scheme.code-text
+                }.to-hex(),
+                code-border: if code-border { scheme.line.to-hex() } else { "transparent" },
+                added: scheme.diff.added.at(0).to-hex(),
+                added-bar: scheme.diff.added.at(1).to-hex(),
+                removed: scheme.diff.removed.at(0).to-hex(),
+                removed-bar: scheme.diff.removed.at(1).to-hex(),
+                // The syntax colors are made for a light panel; in the dark scheme they get inverted.
+                syntax-filter: if dark { "invert(1) hue-rotate(180deg)" } else { "none" },
+                title-background: if scheme.title-background != none {
+                  scheme.title-background.to-hex()
+                } else {
+                  "transparent"
+                },
+                title-text: scheme.title-text.to-hex(),
+                abstract-background: if scheme.abstract-background != none {
+                  scheme.abstract-background.to-hex()
+                } else {
+                  "transparent"
+                },
+                abstract-text: scheme.abstract-text.to-hex(),
+                logo-light: if dark { "none" } else { "block" },
+                logo-dark: if dark { "block" } else { "none" },
+              )
+                .pairs()
+                .map(((name, value)) => "--" + name + ":" + value + ";")
+                .join()
+              html.elem("style", {
+                ":root {"
+                variables(light-scheme, false)
+                "--corner-radius:" + str(corner-radius * 1.5) + "rem;"
+                "--text-position:" + if text-top { "start" } else { "center" } + ";"
+                // The stylesheet's sizes belong to the default sizes; scale them in proportion.
+                "--size-text:" + str(calc.round(1.125 * size("text") / 14, digits: 3)) + "rem;"
+                (
+                  "--size-heading:"
+                    + str(calc.round(1.2 * size("heading") / 15, digits: 3))
+                    + "rem;"
+                )
+                "--size-title:" + str(calc.round(1.35 * size("title") / 17, digits: 3)) + "rem;"
+                (
+                  "--size-title-page:"
+                    + str(calc.round(2.6 * size("title-page") / 30, digits: 3))
+                    + "rem;"
+                )
+                "--size-brand:" + str(calc.round(1.6 * size("brand") / 20, digits: 3)) + "rem;"
+                "--size-code:" + str(calc.round(0.8 * size("code") / 10.9, digits: 3)) + "rem;"
+                "--font-text:" + css-fonts(text-font) + ";"
+                "--font-code:" + css-fonts(code-font, generic: "monospace") + ";"
+                "--font-brand:" + css-fonts(brand-font) + ";"
+                "}"
+                if has-dark {
+                  ":root[data-theme=\"dark\"] {" + variables(dark-scheme, true) + "}"
+                  "@media (prefers-color-scheme: dark) { :root:not([data-theme=\"light\"]) {"
+                  variables(dark-scheme, true)
+                  "} }"
+                }
+              })
+        })
+        html.elem("body", {
+              html.elem("header", {
+                html.elem(
+                  "span",
+                  attrs: (
+                    class: "title"
+                      + if title-underline { "" } else { " no-underline" }
+                      + if title-uppercase { " uppercase" } else { "" },
+                  ),
+                  title,
+                )
+                html.elem("span", attrs: (class: "brand"), {
+                  if source != none {
+                    html.elem("button", attrs: (
+                      type: "button",
+                      class: "header-button download",
+                      aria-label: labels.download,
+                      title: labels.download,
+                      data-source: source,
+                      data-name: source-name,
+                    ))
+                  }
+                  if has-dark {
+                    html.elem("button", attrs: (
+                      type: "button",
+                      class: "header-button theme-toggle",
+                      aria-label: labels.theme,
+                      title: labels.theme,
+                    ))
+                  }
+                  // Both logos are embedded; the stylesheet shows the one matching the color scheme.
+                  if light-scheme.logo != none {
+                    html.elem("span", attrs: (class: "logo-light"), light-scheme.logo)
+                  }
+                  if dark-scheme.logo != none {
+                    html.elem("span", attrs: (class: "logo-dark"), dark-scheme.logo)
+                  }
+                  brand-text
+                })
+              })
+              html.elem("main", output.join())
+              html.elem("script", read("assets/web.js"))
         })
       })
-      html.elem("main", output.join())
-      html.elem("script", read("assets/web.js"))
     } else {
       output.join(pagebreak())
     }

@@ -66,23 +66,10 @@ should apply to the website as well belong under `sizes` in the theme.
   marked green, removed lines red.
 - Blocks are shown with line numbers and a file-type icon.
 - `#diff-off` shows the following blocks plainly, `#diff-on` resumes the comparison with
-  the last block shown before. Import both next to `tutorial`, just like `tabs`. `diff: false` in the call
+  the last block shown before. Import both next to `tutorial`. `diff: false` in the call
   switches the highlighting off for the whole tutorial.
-- Several blocks in one step are shown as tabs. With `tabs: false` in the call they are
-  shown one below the other instead, and `#tabs[…]` turns only the blocks passed to it
-  into tabs. In the PDF each tab gets its own page with the same explanation, and the
-  tab bar marks which file is shown.
-
-  ````typ
-  #tabs[
-  ```js main.js
-  console.log("Hello")
-  ```
-  ```css style.css
-  body { color: teal; }
-  ```
-  ]
-  ````
+- Several blocks in one step are shown as tabs. In the PDF each tab gets its own page with
+  the same explanation, and the tab bar marks which file is shown.
 - In the PDF, code too long for one page continues on the next, split between lines. Text
   too long continues as well, split between paragraphs; the code stays next to it. On the
   website the code panel scrolls instead.
@@ -97,8 +84,8 @@ should apply to the website as well belong under `sizes` in the theme.
 | `mode` | `"light"` | `"light"` or `"dark"`; color scheme of the PDF |
 | `diff` | `true` | Highlight what changed in a file since the previous step; `false` for unrelated excerpts |
 | `show-removed` | `true` | Keep removed code lines visible, highlighted in red |
-| `tabs` | `true` | Show several code blocks of a step as tabs; `false` shows them one below the other |
 | `logo`, `logo-dark` | `none` | Image at the top right, e.g. `image("logo.svg")` |
+| `favicon` | `auto` | Icon of the website in the browser tab: the typtorial icon, `none`, or your own as `read("icon.svg", encoding: none)` (SVG, PNG or ICO) |
 | `source`, `source-name` | `none` | Text of the source file, offered as a download on the website |
 | `theme` | `(:)` | Fonts, colors, brand text and layout, see below |
 | `fonts`, `sizes`, `colors`, `brand`, `layout`, `dark` | `(:)` | Single theme settings given directly; they override `theme` |
@@ -173,7 +160,8 @@ website then follows the reader's system setting and offers a button to switch.
 
 The website needs Typst's HTML export, which is experimental: pass
 `--features html --format html` and expect two warnings. Styles and script are embedded,
-so the result is a single HTML file.
+so the result is a single HTML file. Readers move one step forward or back with the
+arrow keys ← and →.
 
 ## Fonts
 

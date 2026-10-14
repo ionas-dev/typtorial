@@ -1,1 +1,1 @@
-#import "src/tutorial.typ": diff-off, diff-on, tabs, themes, tutorial
+#import "src/tutorial.typ": diff-off, diff-on, themes, tutorial

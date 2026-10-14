@@ -1,0 +1,54 @@
+# Builds docs/index.typ into a website and publishes it on GitHub Pages.
+# Needs Settings > Pages > Source set to "GitHub Actions".
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/**
+      - src/**
+      - themes/**
+      - lib.typ
+      - typst.toml
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a newer push replaces a queued one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: typst-community/setup-typst@v4
+        with:
+          typst-version: 0.15.1
+
+      # The page imports `../lib.typ`, so the root is the repository, not `docs/`.
+      - name: Build
+        run: |
+          mkdir -p _site
+          typst compile --root . --features html --format html \
+            docs/index.typ _site/index.html
+
+      - uses: actions/upload-pages-artifact@v4
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
