@@ -1,7 +1,8 @@
 #!/bin/sh
 # Renders the last page of the template once per bundled theme in light and
 # dark mode into screenshots/ for the README. The default theme in light mode
-# is rendered larger: it doubles as the template thumbnail.
+# doubles as the template thumbnail, so all of them share its resolution: the
+# longer edge must be at least 1080 px.
 # Usage: scripts/screenshots.sh
 set -eu
 
@@ -28,13 +29,9 @@ render() {
 
 for theme in default paper forest indigo coral; do
   for mode in light dark; do
-    [ "$theme-$mode" = default-light ] && continue
-    render "$theme" "$mode" 110 "$out/$theme-$mode.png"
+    render "$theme" "$mode" 150 "$out/$theme-$mode.png"
   done
 done
-
-# The template as initialized; the longer edge must be at least 1080 px.
-render default light 250 "$out/default-light.png"
 
 if command -v oxipng >/dev/null; then
   oxipng --quiet --opt 4 --strip safe "$out"/*.png
